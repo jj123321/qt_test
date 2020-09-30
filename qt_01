@@ -1,0 +1,169 @@
+
+import csv
+import talib
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn import svm
+from sklearn import preprocessing
+import pandas as pd
+
+class DataManager:
+    def __init__(self):
+        self.datapath = "E:\\趋势软件实验\\601398.csv"
+        self.data_pre()
+
+
+###############################################################################
+    def readInfo(self,fieldOption):#返回指定excel文件中第 fieldOption 列,从 0 列开始
+        info = []
+        # datapath = "E:\\趋势软件实验\\601398.csv"
+        datapath=self.datapath
+        with open(datapath, 'r') as f:
+            reader = csv.reader(f)
+            i = 0
+            for r in reader:
+                if i > 0:
+                    info.append(r[fieldOption])
+                i = i + 1
+        return info
+################################################################################
+    def data_pre(self):
+        n=5 # 表示n天平均,下标n开始才有均值，[0:n-1]都是nan
+        close=self.readInfo(3)
+        close=np.array(close,dtype='f8')
+        close_sma = talib.SMA(close, n)
+        close_1=(close-close_sma)/close_sma # 超过均线的百分比
+
+        num=len(close) # 样本个数
+        close_pro=(close[1:num]-close[0:num-1])/close[0:num-1] # 每日增长率，（今日-昨日）昨日
+        close_pro=np.insert(close_pro,0,"nan")
+
+        close_d=(close_sma[1:num]-close_sma[0:num-1])/close_sma[0:num-1]
+        close_d=np.insert(close_d,0,"nan")
+
+        buy_sig=np.zeros(num) # 记录buy的标志，1是有效，其余是0 ;初始化都为0
+        sell_sig=np.zeros(num) # 记录sell的标志，1时有效，其他是0 ；初始化都为0
+        for i in range(1,num):
+            if close[i]>close_sma[i] and close[i-1]<close_sma[i-1]:
+                buy_sig[i]=1
+            elif close[i]<close_sma[i] and close[i-1]>close_sma[i-1]:
+                sell_sig[i]=1
+
+        trade_state=np.zeros(num) #1:大于；0：小于；；nan: 无数据；初始化都为0
+        trade_id=np.zeros(num) # 交易序号，表示第几次交易
+        for i in range(num):
+            if close[i]>=close_sma[i]:
+                trade_state[i]=1
+                trade_id[i]=1
+            elif close[i]<close_sma[i]:
+                trade_state[i]=0
+                trade_id[i]=0
+            else:
+                trade_state[i]="nan"
+                trade_id[i]="nan"
+
+        temp_n=1
+        for i in range(num):
+            if buy_sig[i]==1:
+                while(True):
+                    if trade_state[i]==1:
+                        trade_id[i]=temp_n
+                    else:break
+                    i=i+1
+                temp_n=temp_n+1
+
+        trade_day=np.zeros(num) # 每次交易持续天数
+        for i in range(num):
+            if buy_sig[i]==1:
+                k=1
+                while(True):
+                    if trade_state[i+k]==1:
+                        k=k+1
+                    else:break
+                trade_day[i]=k
+
+        profit=np.zeros(num) # 每次盈利
+        for i in range(num):
+            if buy_sig[i]==1:
+                k=trade_day[i]
+                if k==0:
+                    print("error")
+                else:
+                    di=int(i+k)
+                    profit[i]=((close[di]-close[i])/close[i])
+
+        # 测试输出内容，可删除《——————————————————————————
+        print(profit.tolist())
+        print(temp_n)
+        print(trade_day.tolist())
+        print(trade_id.tolist())
+
+        print((trade_state.tolist()))
+        print((buy_sig.tolist()))
+        print((sell_sig.tolist()))
+        # 测试输出内容，可删除——————————————————————————》
+        df = pd.DataFrame({'profit': profit ,'close': close, 'close_pro': close_pro, 'close_1': close_1, 'trade_id': trade_id,'trade_day': trade_day,})
+        df_plot=pd.DataFrame({'profit':profit,'trade_day':trade_day})
+
+        #统计输出并画图
+        x1=[] # 成功的持续天数
+        y1=[] # 成功的收益率
+        x2=[] # 失败的持续天数
+        y2=[] # 失败的收益率
+        x1_close_pro=[]
+        x2_close_pro=[]
+        x1_close_1=[]
+        x2_close_1=[]
+        x1_trade_day=[]
+        x2_trade_day=[]
+        x1_k=[] # 均线斜率
+        x2_k=[] # 均线斜率
+        trade_time1=[] # 每日交易日期，为了看看是否信号过于集中
+        for i in range(num):
+            if df.trade_day[i]>3:
+                trade_time1.append(i)
+                if df.profit[i]>0:
+                    x1.append(df.trade_day[i])
+                    y1.append(df.profit[i]+df.close_pro[i-1]+df.close_pro[i-2]-0.005)
+                    x1_close_pro.append(df.close_pro[i])
+                    x1_close_1.append(df.close_1[i])
+                    x1_trade_day.append(df.trade_day[i])
+                    x1_k.append(close_d[i]*10000)
+                else:
+
+                    x2.append(df.trade_day[i])
+                    y2.append(df.profit[i]+df.close_pro[i-1]+df.close_pro[i-2]-0.005)
+                    x2_close_pro.append(df.close_pro[i])
+                    x2_close_1.append(df.close_1[i])
+                    x2_trade_day.append(df.trade_day[i])
+                    x2_k.append(close_d[i]*10000)
+            else:trade_time1.append(0)
+        sum1=0 # 成功的总收益
+        sum2=0 # 失败的总收益
+        for i in y1:
+            sum1=sum1+i
+        for i in y2:
+            sum2=sum2+i
+        print("周期是：",str(n)+" day")
+        print("成功的总收益是：",sum1)
+        print("失败的总收益是：", sum2)
+        print("总的收益是：",sum1+sum2)
+        print("成功率是： ",len(x1)/(len(x1)+len(x2)))
+        print("总次数是： ",(len(x1)+len(x2)))
+        # print(df.hist)
+        print(len(close_d))
+        print(trade_time1)
+
+        date_origin=self.readInfo(0)
+        date=[]
+        for i in range(len(trade_time1)):
+            if trade_time1[i]>0:
+               date.append(date_origin[i])
+        print(date)
+        # 画图
+        # plt.scatter(x1_k, x1_trade_day,c='red', alpha=0.4, label='类别A')
+        # plt.scatter(x2_k,x2_trade_day,c='blue',alpha=0.3)
+        plt.plot(trade_time1)
+        plt.show()
+
+DataManager()
