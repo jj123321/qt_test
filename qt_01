@@ -1,4 +1,4 @@
-
+##
 import csv
 import talib
 import numpy as np
